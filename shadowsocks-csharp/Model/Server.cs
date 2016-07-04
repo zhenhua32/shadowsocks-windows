@@ -1,22 +1,26 @@
 using System;
-using System.Collections.Generic;
 using System.Text;
-using System.IO;
-using System.Diagnostics;
-using SimpleJson;
-using Shadowsocks.Controller;
 using System.Text.RegularExpressions;
+
+using Shadowsocks.Controller;
 
 namespace Shadowsocks.Model
 {
     [Serializable]
     public class Server
     {
+        public static readonly Regex
+            UrlFinder = new Regex("^ss://((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$",
+                                  RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            DetailsParser = new Regex("^((?<method>.+?)(?<auth>-auth)??:(?<password>.*)@(?<hostname>.+?)" +
+                                      ":(?<port>\\d+?))$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public string server;
         public int server_port;
         public string password;
         public string method;
         public string remarks;
+        public bool auth;
 
         public override int GetHashCode()
         {
@@ -26,16 +30,16 @@ namespace Shadowsocks.Model
         public override bool Equals(object obj)
         {
             Server o2 = (Server)obj;
-            return this.server == o2.server && this.server_port == o2.server_port;
+            return server == o2.server && server_port == o2.server_port;
         }
 
         public string FriendlyName()
         {
-            if (string.IsNullOrEmpty(server))
+            if (server.IsNullOrEmpty())
             {
                 return I18N.GetString("New server");
             }
-            if (string.IsNullOrEmpty(remarks))
+            if (remarks.IsNullOrEmpty())
             {
                 return server + ":" + server_port;
             }
@@ -47,52 +51,31 @@ namespace Shadowsocks.Model
 
         public Server()
         {
-            this.server = "";
-            this.server_port = 8388;
-            this.method = "aes-256-cfb";
-            this.password = "";
-            this.remarks = "";
+            server = "";
+            server_port = 8388;
+            method = "aes-256-cfb";
+            password = "";
+            remarks = "";
+            auth = false;
         }
 
         public Server(string ssURL) : this()
         {
-            string[] r1 = Regex.Split(ssURL, "ss://", RegexOptions.IgnoreCase);
-            string base64 = r1[1].ToString();
-            byte[] bytes = null;
-            for (var i = 0; i < 3; i++)
-            {
-                try
-                {
-                    bytes = System.Convert.FromBase64String(base64);
-                }
-                catch (FormatException)
-                {
-                    base64 += "=";
-                }
-            }
-            if (bytes == null)
-            {
-                throw new FormatException();
-            }
-            try
-            {
-                string data = Encoding.UTF8.GetString(bytes);
-                int indexLastAt = data.LastIndexOf('@');
+            var match = UrlFinder.Match(ssURL);
+            if (!match.Success) throw new FormatException();
+            var base64 = match.Groups[1].Value;
+            match = DetailsParser.Match(Encoding.UTF8.GetString(Convert.FromBase64String(
+                base64.PadRight(base64.Length + (4 - base64.Length % 4) % 4, '='))));
+            method = match.Groups["method"].Value;
+            auth = match.Groups["auth"].Success;
+            password = match.Groups["password"].Value;
+            server = match.Groups["hostname"].Value;
+            server_port = int.Parse(match.Groups["port"].Value);
+        }
 
-                string afterAt = data.Substring(indexLastAt + 1);
-                int indexLastColon = afterAt.LastIndexOf(':');
-                this.server_port = int.Parse(afterAt.Substring(indexLastColon + 1));
-                this.server = afterAt.Substring(0, indexLastColon);
-
-                string beforeAt = data.Substring(0, indexLastAt);
-                string[] parts = beforeAt.Split(new[] { ':' });
-                this.method = parts[0];
-                this.password = parts[1];
-            }
-            catch (IndexOutOfRangeException)
-            {
-                throw new FormatException();
-            }
+        public string Identifier()
+        {
+            return server + ':' + server_port;
         }
     }
 }
